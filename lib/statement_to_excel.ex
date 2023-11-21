@@ -27,36 +27,64 @@ defmodule StatementToExcel do
     |> String.split("\n")
     |> Enum.join(" ")
     |> extract_statement_data()
-    |> Stream.map(fn sublist -> hd(sublist) end)
+    |> Stream.map(&hd(&1))
     |> Stream.map(&scan_statement_text/1)
+    |> Stream.reject(&is_nil/1)
+    |> Stream.chunk_by(&is_atom/1)
+    |> Enum.map_reduce(nil, &assign_category/2)
+    |> elem(0)
     |> Enum.reject(&is_nil/1)
+    |> Enum.flat_map(&Function.identity/1)
   end
 
   defp extract_data_from_pdf(_, _), do: raise("Cannot process file")
 
   defp extract_statement_data(txt) do
-    # TODO: make sure to extract the categories as well (deposits vs payments)
-    Regex.scan(~r/(\d{2}\/\d{2}\s.*\.\d{2})/U, txt, capture: :all)
+    Regex.scan(~r/(Deposits|Payments)|(\d{2}\/\d{2}\s.*\.\d{2})/U, txt, capture: :all)
   end
 
   defp scan_statement_text(line) do
     # TD Format, look into including others, use a atom to differentiate
     regexline =
       Regex.run(
-        ~r/(\d{2}\/\d{2})(\s.*[A-Za-z\s])((\d,)?\d{1,3}\.\d{2})/,
+        ~r/(Deposits|Payments)|(\d{2}\/\d{2})(\s.*[A-Za-z\s])((\d,)?\d{1,3}\.\d{2})/,
         line
       )
 
     case regexline do
-      [_, date, description, amount | _] ->
+      [_, _, date, description, amount | _] ->
         formatted_amount = amount |> String.replace(",", "") |> String.to_float()
         [date, String.trim(description), formatted_amount]
 
-      ["Electronic Payments", _] ->
+      [_, "Payments"] ->
         :payments
+
+      [_, "Deposits"] ->
+        :deposits
 
       _ ->
         nil
     end
   end
+
+  defp assign_category(list, category) do
+    if is_atom(hd(list)) do
+      {nil, List.last(list)}
+    else
+      {list
+       |> Enum.map(fn [date, desc, amount] ->
+         [
+           atom_to_string(category),
+           date,
+           desc,
+           if(category == :payments,
+             do: amount * -1,
+             else: amount
+           )
+         ]
+       end), category}
+    end
+  end
+
+  defp atom_to_string(atom) when is_atom(atom), do: Atom.to_string(atom) |> String.capitalize()
 end
