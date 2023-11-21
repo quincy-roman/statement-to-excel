@@ -18,7 +18,8 @@ defmodule StatementToExcel do
     {pdf_as_txt, exit_status} =
       System.cmd("pdftotext", ["-raw", pdf_path, "-"])
 
-    {extract_data_from_pdf(pdf_as_txt, exit_status), :ok}
+    extract_data_from_pdf(pdf_as_txt, exit_status)
+    |> ExcelWriter.write_tuples_to_xlsx(Path.basename(pdf_path, ".pdf"))
   end
 
   defp extract_data_from_pdf(txt, 0) do
@@ -48,7 +49,8 @@ defmodule StatementToExcel do
 
     case regexline do
       [_, date, description, amount | _] ->
-        {date, String.trim(description), amount}
+        formatted_amount = amount |> String.replace(",", "") |> String.to_float()
+        [date, String.trim(description), formatted_amount]
 
       ["Electronic Payments", _] ->
         :payments
